@@ -1,0 +1,15 @@
+# Blocks cross-tenant ingress to tenant-b workloads.
+# NOTE: kind's default CNI (kindnet) does NOT enforce NetworkPolicies.
+# Effective on EKS/GKE/AKS or kind+Calico/Cilium.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-from-other-tenants
+  namespace: tenant-b
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
