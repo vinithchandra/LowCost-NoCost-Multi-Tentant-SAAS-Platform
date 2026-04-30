@@ -1,0 +1,47 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: devops-platform
+# Minimal profile: single-node cluster to save RAM on 8 GB laptops.
+# Still simulates multi-tenant via namespaces (tenant-a, tenant-b).
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+      # Extend leader-election + etcd timeouts for slow WSL2 vhdx disk I/O.
+      - |
+        kind: ClusterConfiguration
+        etcd:
+          local:
+            extraArgs:
+              heartbeat-interval: "1000"
+              election-timeout: "10000"
+        controllerManager:
+          extraArgs:
+            leader-elect-lease-duration: "60s"
+            leader-elect-renew-deadline: "45s"
+            leader-elect-retry-period: "10s"
+        scheduler:
+          extraArgs:
+            leader-elect-lease-duration: "60s"
+            leader-elect-renew-deadline: "45s"
+            leader-elect-retry-period: "10s"
+        apiServer:
+          extraArgs:
+            request-timeout: "120s"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
+      - containerPort: 30000   # ArgoCD UI
+        hostPort: 30000
+      - containerPort: 30001   # Grafana UI
+        hostPort: 30001
+      - containerPort: 30002   # n8n UI
+        hostPort: 30002

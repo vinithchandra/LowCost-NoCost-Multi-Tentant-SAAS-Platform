@@ -1,0 +1,22 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tenant-error-rate
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+spec:
+  groups:
+    - name: tenant.rules
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(istio_requests_total{response_code=~"5.."}[5m])) by (destination_workload_namespace)
+              /
+            sum(rate(istio_requests_total[5m])) by (destination_workload_namespace) > 0.01
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High 5xx error rate in {{ $labels.destination_workload_namespace }}"
+            description: "Error rate >1% for 2m in {{ $labels.destination_workload_namespace }}"

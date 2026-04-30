@@ -1,0 +1,9 @@
+# WSL2 resource caps for the DevSecOps platform on an 8 GB laptop.
+# COPY THIS FILE TO:  C:\Users\<your-username>\.wslconfig
+# Then run in PowerShell:  wsl --shutdown
+# Open a new Ubuntu terminal and changes take effect.
+[wsl2]
+memory=5GB        # WSL2 may use up to 5GB. Leaves ~2.7GB for Windows + Docker Desktop UI.
+processors=6      # Use 6 of your 8 cores for Linux. Leaves 2 for Windows responsiveness.
+swap=4GB          # Linux swap file. Helps when memory pressure hits.
+localhostForwarding=true
