@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: alert-simulator
+  namespace: platform-tools
+spec:
+  schedule: "*/1 * * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sim
+              image: curlimages/curl:8.10.1
+              resources:
+                requests: { cpu: "10m", memory: "16Mi" }
+                limits:   { cpu: "50m", memory: "32Mi" }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  R=$(( RANDOM % 3 ))
+                  if [ "$R" = "0" ]; then SEV="critical"; ALERT="HighErrorRate"; SUM="Error rate exceeded 1%";
+                  elif [ "$R" = "1" ]; then SEV="warning";  ALERT="PodMemoryHigh"; SUM="Memory above 80%";
+                  else SEV="info"; ALERT="DeploymentRolled"; SUM="New revision deployed"; fi
+                  if [ $(( RANDOM % 2 )) = "0" ]; then NS="tenant-a"; else NS="tenant-b"; fi
+                  echo "Firing: severity=$SEV alert=$ALERT ns=$NS"
+                  curl -sS -X POST \
+                    -H "Content-Type: application/json" \
+                    -d "{\"alertname\":\"$ALERT\",\"severity\":\"$SEV\",\"namespace\":\"$NS\",\"summary\":\"$SUM\"}" \
+                    http://n8n.platform-tools.svc.cluster.local:5678/webhook/alert
+                  echo ""
