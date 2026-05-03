@@ -87,24 +87,47 @@ def fig_gitops_leadtime() -> None:
     natural = [float(r["leadtime_seconds_pod_ready"])
                for r in read_csv(DATA / "gitops-leadtime-natural.csv")]
 
+    # Webhook experiment has a different schema (leadtime_ready_s)
+    webhook_path = DATA / "gitops-leadtime-webhook.csv"
+    webhook: list[float] = []
+    if webhook_path.exists():
+        for r in read_csv(webhook_path):
+            v = r.get("leadtime_ready_s", "")
+            try:
+                webhook.append(float(v))
+            except (ValueError, TypeError):
+                continue  # skip TIMEOUT rows
+
     fig, ax = plt.subplots()
-    data = [forced, natural]
-    labels = ["Forced sync\n(`argocd app sync`)",
-              "Natural sync\n(30 s poll)"]
-    ax.boxplot(data, positions=[0, 1], widths=0.5, showmeans=True,
-               meanprops=dict(marker="D", markerfacecolor="white",
-                              markeredgecolor="black", markersize=7),
-               patch_artist=True,
-               boxprops=dict(facecolor="#b2e2b2", alpha=0.7))
-    ax.set_xticks([0, 1])
+    if webhook:
+        data = [forced, webhook, natural]
+        labels = ["Forced sync\n(`argocd app sync`)",
+                  "GitHub webhook\n(04c)",
+                  "Natural sync\n(30 s poll)"]
+        colors = ["#b2e2b2", "#7fbf7f", "#f4a582"]
+    else:
+        data = [forced, natural]
+        labels = ["Forced sync\n(`argocd app sync`)",
+                  "Natural sync\n(30 s poll)"]
+        colors = ["#b2e2b2", "#f4a582"]
+
+    positions = list(range(len(data)))
+    bp = ax.boxplot(data, positions=positions, widths=0.5, showmeans=True,
+                    meanprops=dict(marker="D", markerfacecolor="white",
+                                   markeredgecolor="black", markersize=7),
+                    patch_artist=True)
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.75)
+
+    ax.set_xticks(positions)
     ax.set_xticklabels(labels)
     ax.set_ylabel("git push → pod ready (seconds)")
-    ax.set_title("GitOps lead time — triggered vs. poll-driven")
-    m1, m2 = median(forced), median(natural)
-    ax.annotate(f"median {m1:.1f}s", (0, m1), xytext=(12, 0),
-                textcoords="offset points", fontsize=9)
-    ax.annotate(f"median {m2:.1f}s", (1, m2), xytext=(12, 0),
-                textcoords="offset points", fontsize=9)
+    ax.set_title("GitOps lead time — trigger mechanism comparison")
+    for pos, series in zip(positions, data):
+        m = median(series)
+        ax.annotate(f"median {m:.1f}s", (pos, m), xytext=(12, 0),
+                    textcoords="offset points", fontsize=9)
     fig.savefig(OUT / "fig2_gitops_leadtime.png")
     plt.close(fig)
 

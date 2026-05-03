@@ -79,6 +79,25 @@ Same physical mechanism as natural sync, but trigger immediately via `argocd app
 - **Implication:** the GitOps pipeline itself completes in ~7 s once triggered. The natural-sync delay (B/C above) is dominated by Argo's various polling caches, not by Argo or k8s execution time. A webhook would deliver the full ~7 s lead time end-to-end.
 - *(See `data/gitops-leadtime.csv`.)*
 
+### GitOps lead time — GitHub webhook drive (script 04c, n=5)
+Implemented a public GitHub webhook via ngrok → port-forward → argocd-server `/api/webhook` with HMAC-SHA256 secret. Each run edits `replicas:` in the tenant manifest, commits, pushes, and times git-push → argo-synced → pod-ready.
+
+- sync-lead (s): 12, 14, 13, 15, 14 — **median 14**, mean 13.6
+- ready-lead (s): 15, 14, 16, 15, 15 — **median 15**, mean 15.0
+- All five runs consistent (σ < 1.5 s) — webhook delivery is deterministic, no polling jitter.
+
+**Comparison — lead time from git push to pod-ready, median seconds:**
+
+| trigger mechanism | median (s) | relative |
+|---|---:|---:|
+| Forced refresh+sync (baseline) | 7 | 1.0× |
+| **GitHub webhook (04c)** | **15** | **2.1×** |
+| Natural polling, repo-server restarted (04b-C) | 74 | 10.5× |
+| Natural polling, default | 132 | 18.9× |
+
+**Conclusion:** a webhook closes ~88 % of the gap between default polling and forced sync. The residual ~7 s over forced-sync baseline is unavoidable (git fetch + manifest diff + Kubernetes apply). **Webhook delivery is the correct answer for sub-30-s end-to-end GitOps lead time on a single-node cluster.** Cost to implement: one `webhook.github.secret` in `argocd-secret`, one tunnel, one GitHub webhook configuration. No per-Application annotations needed.
+- *(See `data/gitops-leadtime-webhook.csv`.)*
+
 ### Alert-pipeline latency (script 05, n=10)
 - Per-run (ms): 7020, 908, 1070, 885, 593, 640, 827, 1026, 924, 1018
 - **Cold-start (run 1): 7020 ms** — first invocation after idle (n8n re-establishing event loop / TLS to webhook.site).
@@ -114,11 +133,46 @@ Captured every 30 s for 30 min idle (alert-simulator suspended) + 30 min under l
 - **Top-5 pod ranking unchanged** between idle and load — workload is additive, not distortive.
 - *(See `data/timeseries.csv` and `data/timeseries-docker.csv`.)*
 
-### Scale ceiling (script 07, deferred)
-*(See `data/scale-test.csv`.)*
+### Scale ceiling (script 07)
+Two runs, each adding synthetic `scale-test-N` tenants in isolated namespaces until failure.
 
-## Cost comparison (manual research, deferred)
-*(See `data/cost-table.md`.)*
+**Run 1 — conservative (10 tenants × 3 replicas = up to 30 extra pods):**
+- All 10 steps succeeded.
+- Node memory: 2141 Mi → 2404 Mi (+263 Mi over 30 pods = **~8.8 Mi/pod**).
+- No saturation observed within this range.
+- *(See `data/scale-test-small.csv`.)*
+
+**Run 2 — aggressive (30 tenants × 5 replicas = up to 150 extra pods):**
+- **Ceiling reached at step 18 (89 of 90 replicas scheduled).**
+- Node memory at success ceiling: **2977 Mi (85 extra pods live, step 17)**.
+- Node memory at failure: 3038 Mi (60 % of the 5 GB cap — memory was NOT the limiter).
+- Memory cost: 2977 − 2117 = 860 Mi over 85 pods = **~10.1 Mi per pod**.
+- *(See `data/scale-test-aggressive.csv`.)*
+
+**Root cause of the ceiling — kubelet `maxPods=110` default:**
+- At step 17: ~17 system pods + 5 real-tenant pods + 85 scale-test pods ≈ **107 pods total**.
+- Step 18 attempted 112 → kubelet refused admission of the last pod.
+- CPU at the failure moment was 250 m (scheduler idle), confirming this was an *admission-control* refusal, not resource exhaustion.
+
+**Key findings:**
+- **Single-node kind clusters on WSL2 saturate at ~110 pods, not at memory.** The 5 GB WSL2 cap could theoretically hold ~300 pods (at 10 Mi each) but kubelet stops accepting new pods far earlier.
+- **Raising the ceiling is trivial** — pass `maxPods: 250` via a kubeadm patch or kind `kubeletExtraArgs` — but makes a good discussion point in the paper about implicit K8s limits versus host-resource limits.
+- **Memory scaling is linear (~10 Mi per idle nginx pod).** A practical operating point is ~50–80 tenant pods per node on this hardware, leaving headroom for bursts and system workloads.
+- **CPU headroom is ample** — peak burst 4715 m / 6000 m available (79 %), never sustained. Memory is the long-term constraint.
+
+## Cost comparison (desk research, 2025 pricing)
+Matched workload: 1 cluster, ~4 GB / 2 vCPU node, ~30 tenant pods, GitOps CD, workflow automation, monitoring, external alerting.
+
+| Stack | Monthly | Annual |
+|---|---|---|
+| **This platform** (self-hosted on 8 GB laptop) | **$0** | **$0** |
+| Budget cloud (Linode LKE + self-hosted OSS tools) | ~$24 | ~$288 |
+| Enterprise SaaS (EKS + EC2 + Akuity + n8n Cloud + Datadog + webhook.site Pro + ECR + GitHub Team) | **~$166 / ₹13,800** | **~$1,990 / ₹1.65 L** |
+
+**Savings versus enterprise SaaS:** ~$166/mo = ~₹13,800/mo = ~₹1.65 lakh/year.
+**Savings versus budget cloud:** ~$24/mo = ~₹2,000/mo.
+
+Full breakdown with sources in `data/cost-table.md`.
 
 ## Reproducibility (deferred)
 3 fresh installs from a clean WSL2 distro: time, peak RAM, disk usage. To be measured in Session C.
