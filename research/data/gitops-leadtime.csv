@@ -1,0 +1,1 @@
+run,commit_sha,timestamp,from_replicas,to_replicas,t_push,t_argocd_synced,t_pod_ready,leadtime_seconds_argocd,leadtime_seconds_pod_ready
